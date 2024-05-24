@@ -3,20 +3,50 @@
 <head>
     <title>Google Maps Teste</title>
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyABtMF7HLvrhCj2OgIiIcRlwurWBCUtWJA"></script>
- <script>
+    <style>
+        #map {
+            height: 90%;
+            width: 100%;
+        }
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #controls {
+            height: 10%;
+            padding: 10px;
+            background-color: white;
+        }
+        #form {
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body onload="initMap()">
+    <div id="controls">
+        <input type="text" id="searchBox" placeholder="Pesquisar localização">
+        <button onclick="searchLocation()">Ir</button>
+    </div>
+    <div id="map"></div>
+    <script>
         let map;
         let currentInfoWindow = null;
+        let geocoder;
+        let markersArray = []; // Store all markers for easy removal
 
         function initMap() {
             map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: -34.397, lng: 150.644 },
-                zoom: 8
+                center: { lat: -20.3155, lng: -40.3128 }, // Vitória - ES
+                zoom: 12
             });
+
+            geocoder = new google.maps.Geocoder();
 
             // Load stored markers from localStorage
             loadMarkers();
 
-            map.addListener('click', function(event) {
+            map.addListener('rightclick', function(event) {
                 showAddLocationForm(event.latLng);
             });
         }
@@ -26,31 +56,57 @@
                 currentInfoWindow.close();
             }
 
-            const formHtml = `
-                <div id="form">
-                    <h3>Adicionar Local</h3>
-                    <label>Nome:</label><br>
-                    <input type="text" id="name"><br>
-                    <label>Descrição:</label><br>
-                    <textarea id="description"></textarea><br>
-                    <label>Imagem:</label><br>
-                    <input type="file" id="image"><br>
-                    <p>Latitude: ${location.lat()}</p>
-                    <p>Longitude: ${location.lng()}</p>
-                    <button onclick="addMarker(${location.lat()}, ${location.lng()})">Adicionar</button>
-                </div>
-            `;
+            geocoder.geocode({ location: location }, function(results, status) {
+                if (status === 'OK' && results[0]) {
+                    const address = results[0].formatted_address;
+                    const addressComponents = results[0].address_components;
+                    let street = '';
+                    let neighborhood = '';
+                    let city = '';
 
-            const infoWindow = new google.maps.InfoWindow({
-                content: formHtml,
-                position: location
+                    for (const component of addressComponents) {
+                        if (component.types.includes('route')) {
+                            street = component.long_name;
+                        }
+                        if (component.types.includes('sublocality') || component.types.includes('political')) {
+                            neighborhood = component.long_name;
+                        }
+                        if (component.types.includes('administrative_area_level_2')) {
+                            city = component.long_name;
+                        }
+                    }
+
+                    const formHtml = `
+                        <div id="form">
+                            <h3>Adicionar Local</h3>
+                            <label>Nome:</label><br>
+                            <input type="text" id="name"><br>
+                            <label>Descrição:</label><br>
+                            <textarea id="description"></textarea><br>
+                            <label>Imagem:</label><br>
+                            <input type="file" id="image"><br>
+                            <p>Endereço: ${address}</p>
+                            <p>Rua: ${street}</p>
+                            <p>Bairro: ${neighborhood}</p>
+                            <p>Cidade: ${city}</p>
+                            <button onclick="addMarker('${street}', '${neighborhood}', '${city}', ${location.lat()}, ${location.lng()})">Adicionar</button>
+                        </div>
+                    `;
+
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: formHtml,
+                        position: location
+                    });
+
+                    infoWindow.open(map);
+                    currentInfoWindow = infoWindow;
+                } else {
+                    alert('Geocoder falhou devido a: ' + status);
+                }
             });
-
-            infoWindow.open(map);
-            currentInfoWindow = infoWindow;
         }
 
-        function addMarker(lat, lng) {
+        function addMarker(street, neighborhood, city, lat, lng) {
             const name = document.getElementById('name').value;
             const description = document.getElementById('description').value;
             const imageFile = document.getElementById('image').files[0];
@@ -60,13 +116,13 @@
                 const reader = new FileReader();
                 reader.onloadend = function() {
                     imageUrl = reader.result;
-                    saveMarker({ lat, lng, name, description, imageUrl });
-                    createMarker({ lat, lng, name, description, imageUrl });
+                    saveMarker({ lat, lng, name, description, imageUrl, street, neighborhood, city });
+                    createMarker({ lat, lng, name, description, imageUrl, street, neighborhood, city });
                 }
                 reader.readAsDataURL(imageFile);
             } else {
-                saveMarker({ lat, lng, name, description });
-                createMarker({ lat, lng, name, description });
+                saveMarker({ lat, lng, name, description, street, neighborhood, city });
+                createMarker({ lat, lng, name, description, street, neighborhood, city });
             }
 
             if (currentInfoWindow) {
@@ -87,7 +143,7 @@
             });
         }
 
-        function createMarker({ lat, lng, name, description, imageUrl }) {
+        function createMarker({ lat, lng, name, description, imageUrl, street, neighborhood, city }) {
             const location = { lat: parseFloat(lat), lng: parseFloat(lng) };
 
             const marker = new google.maps.Marker({
@@ -96,13 +152,17 @@
                 title: name
             });
 
+            markersArray.push(marker); // Add marker to array
+
             const infoWindowContent = `
                 <div>
                     <h3>${name}</h3>
                     <p>${description}</p>
                     ${imageUrl ? `<img src="${imageUrl}" alt="${name}" style="max-width: 100px; max-height: 100px;">` : ''}
-                    <p>Latitude: ${lat}</p>
-                    <p>Longitude: ${lng}</p>
+                    <p>Rua: ${street}</p>
+                    <p>Bairro: ${neighborhood}</p>
+                    <p>Cidade: ${city}</p>
+                    <button onclick="deleteMarker(${lat}, ${lng})">Excluir</button>
                 </div>
             `;
 
@@ -116,22 +176,33 @@
 
             map.panTo(location);
         }
+
+        function searchLocation() {
+            const address = document.getElementById('searchBox').value;
+            geocoder.geocode({ address: address }, function(results, status) {
+                if (status === 'OK') {
+                    map.setCenter(results[0].geometry.location);
+                    map.setZoom(15);
+                } else {
+                    alert('Geocode não foi bem-sucedido por causa de: ' + status);
+                }
+            });
+        }
+
+        function deleteMarker(lat, lng) {
+            // Remove marker from localStorage
+            let markers = JSON.parse(localStorage.getItem('markers')) || [];
+            markers = markers.filter(marker => marker.lat !== lat || marker.lng !== lng);
+            localStorage.setItem('markers', JSON.stringify(markers));
+
+            // Remove marker from map
+            markersArray.forEach((marker, index) => {
+                if (marker.position.lat() === lat && marker.position.lng() === lng) {
+                    marker.setMap(null);
+                    markersArray.splice(index, 1);
+                }
+            });
+        }
     </script>
-    <style>
-        #map {
-            height: 100%;
-        }
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-        #form {
-            font-family: Arial, sans-serif;
-        }
-    </style>
-</head>
-<body onload="initMap()">
-    <div id="map"></div>
 </body>
 </html>
